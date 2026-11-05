@@ -219,6 +219,7 @@ button{font-family:inherit;cursor:pointer}
 .frame{width:150px;height:150px;background:#fff;padding:9px;border:8px solid #c9a24a;box-shadow:0 8px 16px rgba(0,0,0,.4),inset 0 0 0 2px #8a6a22;cursor:zoom-in;transition:transform .2s}
 .frame img{width:100%;height:100%;object-fit:cover;display:block}
 .frame:hover{transform:scale(1.04)}
+.frame.playing{box-shadow:0 0 0 4px rgba(255,235,140,.9),0 0 30px 8px rgba(255,210,90,.8)}
 #candles{left:700px;top:250px;width:200px;height:90px;z-index:2;cursor:pointer}
 #candles .shelfbar{position:absolute;left:0;right:0;bottom:0;height:14px;border-radius:3px;background:linear-gradient(#f4f1ec,#c9c3b8);border-bottom:4px solid #b8943f;box-shadow:0 5px 8px rgba(0,0,0,.3)}
 #candles .cd{position:absolute;bottom:14px;width:26px;border-radius:5px 5px 2px 2px;background:linear-gradient(90deg,#f6efe0,#e0d2b4)}
@@ -769,7 +770,7 @@ const CONFIG={
   ],
 
   lockUnlockedMsg:"Les cadenas sont ouverts ! Clique sur chacun pour découvrir ta récompense 🎁",
-  rewards:[{main:"1 escape game au choix",sub:"légendairement légaire🔎"},{main:"1 dîner dans un joli restaurant",sub:"avec ton amoureux · miamesque pro max"}],
+  rewards:[{main:"1 escape game au choix",sub:"avec ton amoureux"},{main:"1 dîner dans un joli restaurant",sub:"avec ton amoureux · all inclusive"}],
   recipeNote:"Ton plat préféré !! Fais-le ;)"
 };
 const LINES={
@@ -847,9 +848,9 @@ let speechToken=0,curAudio=null,lastLine=0,bag=[];const said={};const CHAT_POOL=
 function nextBag(){if(!bag.length){bag=[2,3,11,12,13,14,15].sort(()=>Math.random()-.5);if(bag[bag.length-1]===lastLine)bag.unshift(bag.pop())}return bag.pop()}
 async function say(n,{force=false,face=null,interrupt=false}={}){
   if(speaking&&!force&&!interrupt)return false;
-  if(speaking&&interrupt){speechToken++;if(curAudio){try{curAudio.pause()}catch(e){}curAudio=null}clearInterval(talkTimer);speaking=false}
+  if(speaking&&interrupt){speechToken++;if(curAudio){try{curAudio.pause()}catch(e){}curAudio=null}clearInterval(talkTimer);speaking=false;Music.duck(false)}
   while(speaking)await sleep(120);
-  const my=++speechToken;speaking=true;lastSpoke=Date.now();lastLine=n;
+  const my=++speechToken;speaking=true;Music.duck(true);lastSpoke=Date.now();lastLine=n;
   said[n]=Date.now();const text=LINES[n];btext.textContent=text;bubble.classList.add('on');clearTimeout(bubbleHide);
   if(face)baseFace=face;
   let open=false;clearInterval(talkTimer);talkTimer=setInterval(()=>{open=!open;setFace(open?'st-talk':baseFace)},130);
@@ -862,22 +863,40 @@ async function say(n,{force=false,face=null,interrupt=false}={}){
   if(my!==speechToken)return false;
   clearInterval(talkTimer);setFace(baseFace);curAudio=null;
   bubbleHide=setTimeout(()=>bubble.classList.remove('on'),1100);
-  speaking=false;lastSpoke=Date.now();return true}
+  speaking=false;Music.duck(false);lastSpoke=Date.now();return true}
 function chat(pool,opts){const now=Date.now();const ok=pool.filter(n=>!said[n]||now-said[n]>70000);if(!ok.length)return false;return say(ok[Math.floor(Math.random()*ok.length)],opts)}
 /* music */
-const Music={el:null,timer:null,kind:null,
- stop(){this.kind=null;clearInterval(this.timer);this.timer=null;if(this.el){try{this.el.pause()}catch(e){}this.el=null}},
+const Music={el:null,timer:null,kind:null,tg:null,tn:[],pt:null,lvl:0,mul:1,
+ stop(){this.kind=null;clearInterval(this.timer);this.timer=null;if(this.el){try{this.el.pause()}catch(e){}this.el=null}this.killTension()},
+ killTension(){clearTimeout(this.pt);this.pt=null;const tg=this.tg,tn=this.tn;this.tg=null;this.tn=[];if(tg&&ctx){try{tg.gain.cancelScheduledValues(ctx.currentTime);tg.gain.setTargetAtTime(0,ctx.currentTime,.12)}catch(e){}setTimeout(()=>{tn.forEach(o=>{try{o.stop()}catch(e){}});try{tg.disconnect()}catch(e){}},700)}},
+ startTension(){if(!ctx)return;this.lvl=0;const mg=ctx.createGain();mg.gain.value=0;mg.connect(master);this.tg=mg;
+  const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=380;lp.connect(mg);
+  const o1=ctx.createOscillator(),o2=ctx.createOscillator(),o3=ctx.createOscillator(),lfo=ctx.createOscillator(),lg=ctx.createGain(),g3=ctx.createGain(),trem=ctx.createOscillator(),tg3=ctx.createGain();
+  o1.type='sawtooth';o2.type='sawtooth';o1.frequency.value=110;o2.frequency.value=116.5;o3.type='sine';o3.frequency.value=466;
+  const dg=ctx.createGain();dg.gain.value=.55;o1.connect(dg);o2.connect(dg);dg.connect(lp);
+  lfo.frequency.value=.12;lg.gain.value=130;lfo.connect(lg);lg.connect(lp.frequency);
+  g3.gain.value=.03;trem.frequency.value=5.5;tg3.gain.value=.015;trem.connect(tg3);tg3.connect(g3.gain);o3.connect(g3);g3.connect(mg);
+  [o1,o2,o3,lfo,trem].forEach(o=>o.start());this.tn=[o1,o2,o3,lfo,trem];
+  mg.gain.setTargetAtTime(.1*this.mul,ctx.currentTime,1.5);this.beat()},
+ beat(){if(!this.tg||!ctx)return;const k=this.mul;tone(95,.14,'sine',.2*k);noise(.05,.05*k,450,'lowpass');tone(78,.2,'sine',.14*k,.2);
+  const gap=[1500,1050,680][this.lvl]||1500;this.pt=setTimeout(()=>this.beat(),gap)},
+ setLevel(l){this.lvl=l},
+ duck(on){this.mul=on?.45:1;if(this.tg&&ctx)this.tg.gain.setTargetAtTime(.1*this.mul,ctx.currentTime,.25);if(this.el)this.el.volume=(this.kind==='kitchen'?.13:.55)*this.mul;if(typeof alb!=='undefined'&&alb)alb.volume=.45*this.mul},
+ sting(k){if(!this.tg||!ctx)return;const m=this.mul;
+  if(k==='err'){tone(98,.7,'sawtooth',.16*m,0,-30);tone(740,.6,'triangle',.045*m);tone(784,.6,'triangle',.045*m);noise(.35,.1*m,600,'lowpass')}
+  else if(k==='start'){tone(165,.6,'sawtooth',.07*m,0,200);tone(660,.5,'triangle',.03*m,.1)}
+  else if(k==='ok'){tone(523,.2,'triangle',.07*m);tone(784,.35,'triangle',.07*m,.1)}},
  play(kind){this.stop();this.kind=kind;ensureAudio();let done=false;
   const fb=()=>{if(done)return;done=true;if(this.kind===kind)this.synth(kind)};
-  try{const a=new Audio(`audio/${kind}.mp3`);a.loop=true;a.volume=.55;a.muted=muted;
+  try{const a=new Audio(`audio/${kind==='kitchen'?'annif':kind}.mp3`);a.loop=true;a.volume=(kind==='kitchen'?.13:.55)*this.mul;a.muted=muted;
    a.addEventListener('error',fb,{once:true});
    const p=a.play();if(p&&p.then)p.then(()=>{done=true;if(this.kind===kind)this.el=a;else a.pause()}).catch(fb)}catch(e){fb()}},
- synth(kind){let i=0;const P={
+ synth(kind){if(kind==='kitchen'){this.startTension();return}let i=0;const P={
    flappy:{step:200,notes:[523,659,784,659,880,784,659,523,587,698,880,698,784,659,587,523],bass:[131,175,196,131],type:'triangle',v:.08},
    annif:{step:300,notes:[523,659,784,1047,880,659,784,659,698,880,1047,880,784,988,784,587],bass:[131,110,87,98],type:'sine',v:.1},
    lock:{step:480,notes:[220,262,330,262,247,294,370,294,220,262,330,440,392,330,294,262],bass:[55,55,73,82],type:'sine',v:.09}}[kind];
-  if(!P)return;this.timer=setInterval(()=>{if(!ctx)return;const f=P.notes[i%P.notes.length];tone(f,P.step/1000*1.6,P.type,P.v);if(i%4===0)tone(P.bass[(i/4)%P.bass.length|0],P.step/1000*3,'sine',.14);i++},P.step)}};
-function setMuted(m){muted=m;if(master)master.gain.value=m?0:.85;if(Music.el)Music.el.muted=m;$('#mute').textContent=m?'🔇':'🔊'}
+  if(!P)return;this.timer=setInterval(()=>{if(!ctx)return;const f=P.notes[i%P.notes.length];if(f)tone(f,P.step/1000*1.6,P.type,P.v);if(i%4===0)tone(P.bass[(i/4)%P.bass.length|0],P.step/1000*3,'sine',.14);i++},P.step)}};
+function setMuted(m){muted=m;if(typeof alb!=='undefined'&&alb)alb.muted=m;if(master)master.gain.value=m?0:.85;if(Music.el)Music.el.muted=m;$('#mute').textContent=m?'🔇':'🔊'}
 const root=document.documentElement;
 function goFull(){try{if(!document.fullscreenElement&&root.requestFullscreen)root.requestFullscreen({navigationUI:'hide'}).catch(()=>{})}catch(e){}}
 $('#fsBtn').addEventListener('click',e=>{e.stopPropagation();goFull()});
@@ -954,11 +973,11 @@ function resetKitchen(full=true){
 let toastT;function toast(m){const e=$('#toast');$('#toastTxt').textContent=m;e.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('on'),2600)}
 const progress=()=>{S.last=Date.now();S.idleFlags={}};
 function praise(){if(Date.now()-lastSpoke>3500)chat([16,13,14,15,2,3])}
-function errorLine(n){if(S.stage!=='cook')return;S.errors++;say(n,{interrupt:true});if(S.errors>=6)fired()}
-async function fired(){S.stage='fired';await sleep(300);await say(20,{force:true});$('#fired').classList.add('on');sfx.hit();await sleep(2200);$('#fired').classList.remove('on');resetKitchen(false);S.last=Date.now();setFace('st-stern');baseFace='st-stern';toast('Allez, on recommence.')}
+function errorLine(n){if(S.stage!=='cook')return;Music.sting('err');S.errors++;say(n,{interrupt:true});if(S.errors>=6)fired()}
+async function fired(){S.stage='fired';Music.sting('err');await sleep(300);await say(20,{force:true});$('#fired').classList.add('on');sfx.hit();await sleep(2200);$('#fired').classList.remove('on');resetKitchen(false);S.last=Date.now();setFace('st-stern');baseFace='st-stern';toast('Allez, on recommence.')}
 
 enter.kitchen=async()=>{
-  preloadVoices();resetKitchen(true);sarah.classList.remove('out');baseFace='st-stern';setFace('st-stern');Music.stop();
+  preloadVoices();stopAlbum();resetKitchen(true);sarah.classList.remove('out');baseFace='st-stern';setFace('st-stern');Music.play('kitchen');
   $('#postit').innerHTML='';trySarahImg();
   await sleep(900);if(current!=='kitchen')return;await say(1,{force:true});S.last=Date.now();S.nextRandom=Date.now()+rand(8000,13000);
   clearInterval(idleT);idleT=setInterval(idleTick,1000)};
@@ -981,7 +1000,15 @@ sarah.addEventListener('click',()=>{if(S.stage==='cook'){ensureAudio();chat(CHAT
 /* decor : tout est cliquable */
 {const M={'#kwall':'Un joli mur gris. Rien à faire ici.','#kfloor':'Un sol en marbre noir et blanc. Ça fait riche.','#ctop':'Du marbre ! Ne raye pas le plan de travail.','#cfront':'Les placards, ça s’ouvre. Essaie.','#splash':'Une crédence en marbre. Le chef a du goût.','#sink':'Un évier en inox. Propre, évidemment.','#hob':'La plaque de cuisson.','#burner':'Le feu. À ne pas toucher à mains nues.','#oven':'Le four est en panne. Heureusement.','.knob2':'Cette plaque n’est pas branchée.','.knob3':'Cette plaque n’est pas branchée.','#board':'Une planche à découper en bois.','#clock':'Déjà l’heure de cuisiner.','.pend':'Un lustre doré. Tout est classe ici.'};
  Object.keys(M).forEach(sel=>$$('#s-kitchen '+sel).forEach(el=>el.addEventListener('click',e=>{if(S.stage!=='cook')return;e.stopPropagation();ensureAudio();sfx.pop();toast(M[sel]);progress();if(Math.random()<.3&&!speaking)chat([12,13,14])})))}
-$$('.frame').forEach(f=>f.addEventListener('click',e=>{if(S.stage!=='cook')return;e.stopPropagation();ensureAudio();sfx.pop();lightbox(`<img src="${f.dataset.album}" alt="">`,'');progress()}));
+let alb=null,albIdx=-1;const ALB=[{f:'lushlife',t:'Lush Life'},{f:'star',t:'Star'}];
+function stopAlbum(){if(alb){try{alb.pause()}catch(e){}alb=null}albIdx=-1;$$('.frame').forEach(f=>f.classList.remove('playing'))}
+$$('.frame').forEach((fr,i)=>fr.addEventListener('click',e=>{if(S.stage!=='cook')return;e.stopPropagation();ensureAudio();progress();
+  if(albIdx===i){stopAlbum();Music.play('kitchen');toast('Musique coupée');return}
+  const a=new Audio('audio/'+ALB[i].f+'.mp3');a.volume=.45*Music.mul;a.muted=muted;
+  const nofile=()=>{if(albIdx===i)return;sfx.pop();lightbox(`<img src="${fr.dataset.album}" alt="">`,'')};
+  a.addEventListener('error',nofile,{once:true});
+  a.addEventListener('ended',()=>{if(alb===a){stopAlbum();if(current==='kitchen'&&S.stage==='cook')Music.play('kitchen')}});
+  const pr=a.play();if(pr&&pr.then)pr.then(()=>{stopAlbum();alb=a;albIdx=i;Music.stop();fr.classList.add('playing');toast('♪ '+ALB[i].t)}).catch(nofile)}));
 $('#candles').addEventListener('click',e=>{if(S.stage!=='cook')return;e.stopPropagation();ensureAudio();const on=$('#candles').classList.toggle('lit');$('#candleGlow').classList.toggle('on',on);on?sfx.flame():sfx.click();toast(on?'Ambiance romantique… ✨':'Bougies éteintes.');progress()});
 /* cabinets */
 $$('.cab').forEach((c,i)=>c.addEventListener('click',e=>{if(S.stage!=='cook')return;ensureAudio();const o=c.classList.toggle('open');sfx.click();if(o){progress();const has=Object.keys(S.cabAt).some(k=>S.cabAt[k]===i&&!S.found[k]);if(!has&&Math.random()<.5)chat([12,13,2,15])}}));
@@ -1022,7 +1049,7 @@ async function pourPasta(){S.busy=true;burnerOff();const p=$('#pot');p.classList
   S.pastaState='drained';S.pastaIn=false;S.water=false;S.potPos='stove';
   p.classList.remove('hop');void p.offsetWidth;p.classList.add('hop');p.style.left='625px';p.style.top='';sfx.whoosh();await sleep(850);
   S.busy=false;progress();toast('Les pâtes sont dans la passoire ! Clique dessus.');praise()}
-function failCook(kind){clearInterval(S.cookIv);S.pastaState='none';S.pastaIn=false;S.water=false;S.boil=false;S.salted=false;S.cookGood=false;S.timerOn=false;
+function failCook(kind){Music.setLevel(0);clearInterval(S.cookIv);S.pastaState='none';S.pastaIn=false;S.water=false;S.boil=false;S.salted=false;S.cookGood=false;S.timerOn=false;
   $('#cookbar').classList.remove('on');$('#ktimeTxt').textContent='00:00';$('#potwater').style.height='0';$('#pot').classList.remove('hasPasta','cooked','boil');burnerOff();
   S.have.pasta=true;S.used.pasta=false;$('#inv-pasta').classList.add('have');sfx.hit();
   toast(kind==='raw'?'Trop tôt, c’est cru ! On recommence.':'Trop tard, c’est cramé ! On recommence.');errorLine(kind==='raw'?14:12)}
@@ -1035,14 +1062,14 @@ function cookTick(){if(S.pastaState!=='cooking'||S.stage!=='cook'){clearInterval
   if(e>=COOK_T)failCook('burnt')}
 $('#ktimer').addEventListener('click',e=>{if(S.stage!=='cook')return;e.stopPropagation();ensureAudio();sfx.click();
   if(S.pastaState!=='cooking'){toast('Un minuteur. Utile quand les pâtes cuisent.');return}
-  if(S.timerOn)return;S.timerOn=true;$('#cb-mark').style.left='0%';$('#cookbar').classList.add('on');progress()});
+  if(S.timerOn)return;S.timerOn=true;Music.setLevel(2);$('#cb-mark').style.left='0%';$('#cookbar').classList.add('on');progress()});
 $('#pot').addEventListener('click',()=>{if(S.stage!=='cook'||S.busy)return;ensureAudio();
   if(S.pastaState==='cooking'&&S.potPos==='stove'){
     if(!S.found.colander){toast('Il te faut une passoire ! Cherche dans les placards.');chat([5]);return}
     const e=Date.now()-S.cookStart;
     if(e<GOOD0){failCook('raw');return}
     if(e>GOOD1){failCook('burnt');return}
-    clearInterval(S.cookIv);S.pastaState='cooked';S.timerOn=false;$('#cookbar').classList.remove('on');$('#ktimeTxt').textContent='00:00';pourPasta();return}
+    clearInterval(S.cookIv);Music.setLevel(0);Music.sting('ok');S.pastaState='cooked';S.timerOn=false;$('#cookbar').classList.remove('on');$('#ktimeTxt').textContent='00:00';pourPasta();return}
   if(S.potPos==='sink'){S.potPos='stove';hopPot(625);progress();return}
   if(!S.burner&&!S.pastaIn){S.potPos='sink';hopPot(385);progress();return}
   toast(S.pastaIn?'Les pâtes cuisent encore…':'Éteins la plaque avant de la déplacer.')});
@@ -1064,7 +1091,7 @@ $('#knob').addEventListener('click',()=>{if(S.stage!=='cook'||S.busy)return;ensu
 $('#inv-pasta').addEventListener('click',()=>{if(S.stage!=='cook'||S.busy)return;ensureAudio();
   if(!(S.potPos==='stove'&&S.water&&S.boil)){toast('Il faut de l\'eau bouillante.');errorLine(11);return}
   if(!S.salted){toast('Tu as oublié de saler l’eau !');errorLine(12);return}
-  S.used.pasta=true;S.have.pasta=false;$('#inv-pasta').classList.remove('have');S.pastaIn=true;S.pastaState='cooking';S.cookStart=Date.now();S.timerOn=false;S.cookGood=false;$('#pot').classList.add('hasPasta');sfx.pop();progress();praise();toast('Les pâtes cuisent… clique sur le minuteur !');
+  S.used.pasta=true;S.have.pasta=false;$('#inv-pasta').classList.remove('have');S.pastaIn=true;S.pastaState='cooking';S.cookStart=Date.now();S.timerOn=false;S.cookGood=false;Music.setLevel(1);Music.sting('start');$('#pot').classList.add('hasPasta');sfx.pop();progress();praise();toast('Les pâtes cuisent… clique sur le minuteur !');
   clearInterval(S.cookIv);S.cookIv=setInterval(cookTick,100);kTimers.push(S.cookIv);
   kTimers.push(setTimeout(()=>chat(CHAT_POOL),3500));kTimers.push(setTimeout(()=>chat(CHAT_POOL),9000));
   kTimers.push(setTimeout(()=>{if(S.pastaState==='cooking'&&!S.timerOn){toast('Le minuteur, sur le mur, ça aide…');const t=$('#ktimer');t.classList.remove('wig');void t.offsetWidth;t.classList.add('wig')}},5000))});
@@ -1125,7 +1152,7 @@ $('#plate').addEventListener('click',()=>{if(S.stage!=='cook'||S.busy)return;ens
   checkPlate()});
 function checkPlate(){const P=S.plate;if(S.stage==='cook'&&P.pasta&&P.ham&&P.cream&&P.cheese&&P.pepper){S.stage='mix';circle({title:'Mélange l’assiette : fais des cercles !',icon:'spoon',cancelable:false,done:()=>{S.stage='taste';tasting()}})}}
 async function tasting(){
-  clearInterval(idleT);speaking=false;
+  clearInterval(idleT);speaking=false;Music.stop();stopAlbum();
   toast('Hmm, ça sent bon…');$('#plate').classList.add('mixed');sfx.chop();await sleep(1700);
   baseFace='st-taste';setFace('st-taste');
   await say(17,{force:true,face:'st-taste'});await sleep(1100);
@@ -1137,7 +1164,7 @@ async function tasting(){
   await sleep(1800);
   baseFace='st-stern';await say(21,{force:true,face:'st-stern'});
   sarah.classList.add('out');sfx.whoosh();await sleep(2600);clearInterval(rg);
-  $('#phone').classList.remove('ring');$('#bubble').classList.remove('on');
+  $('#phone').classList.remove('ring');$('#bubble').classList.remove('on');Music.stop();
   go('missed')}
 
 /* ---- 3. missed / call ---- */
@@ -1256,7 +1283,7 @@ console.log('%cSalut curieuse 👀 Je t\'aime.','font-size:22px;color:#ff4d88;fo
 
 /* ---- boot ---- */
 const q=new URLSearchParams(location.search);
-if(q.has('debug'))window.__ju={FL,CONFIG,go,fWin,S};
+if(q.has('debug'))window.__ju={FL,CONFIG,go,fWin,S,Music};
 if(q.has('reset'))save('scene','');
 const start=q.get('go')||(load('scene')==='lock'?'lock':null);
 if(start&&$('#s-'+start)){ensureAudio();
